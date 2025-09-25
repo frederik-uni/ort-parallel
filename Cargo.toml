@@ -3,6 +3,8 @@ name = "ort-parallel"
 version = "0.1.0"
 edition = "2024"
 readme = "README.md"
+license = "MIT"
+description = "A library for running ONNX models in parallel using ORT(session pool)"
 
 [dependencies]
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["std"] }
