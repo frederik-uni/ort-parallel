@@ -1,0 +1,15 @@
+[package]
+name = "ort-parallel"
+version = "0.1.0"
+edition = "2024"
+readme = "README.md"
+
+[dependencies]
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["std"] }
+tokio = { version = "1.47.1", optional = true, features = ["sync"] }
+parking_lot = { version = "0.12", optional = true }
+
+[features]
+default = ["async", "sync"]
+async = ["dep:tokio"]
+sync = ["dep:parking_lot"]
