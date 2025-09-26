@@ -11,12 +11,14 @@ use ort::session::{
 
 use tokio::sync::{Mutex, Semaphore};
 
+use crate::SessionBuilderFactory;
+
 pub struct AsyncSessionPool {
     sessions: Arc<Mutex<Vec<Arc<Mutex<Session>>>>>,
     available_sessions: Arc<Mutex<Vec<usize>>>,
     sem: Arc<Semaphore>,
     max: usize,
-    builder: SessionBuilder,
+    builder: SessionBuilderFactory,
     file: PathBuf,
 }
 
@@ -36,7 +38,7 @@ impl AsyncSessionPool {
             sem: Arc::new(Semaphore::new(max_sessions)),
             available_sessions: Arc::new(Mutex::new(vec![0])),
             max: max_sessions,
-            builder,
+            builder: SessionBuilderFactory(builder),
             file: path.to_path_buf(),
         })
     }
@@ -57,7 +59,7 @@ impl AsyncSessionPool {
 
     fn create_new(&self) -> Result<Arc<Mutex<Session>>, ort::Error> {
         Ok(Arc::new(Mutex::new(
-            self.builder.clone().commit_from_file(&self.file)?,
+            self.builder.generate().commit_from_file(&self.file)?,
         )))
     }
 
