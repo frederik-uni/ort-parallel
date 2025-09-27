@@ -9,7 +9,7 @@ use ort::session::{
     builder::{PrepackedWeights, SessionBuilder},
 };
 
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 
 use crate::SessionBuilderFactory;
 
@@ -72,30 +72,31 @@ impl AsyncSessionPool {
         )))
     }
 
-    async fn release_session(&self, idx: usize) {
+    async fn release_session(&self, idx: usize, permit: SemaphorePermit<'_>) {
         self.available_sessions.lock().await.push(idx);
-        self.sem.add_permits(1);
+        drop(permit);
     }
 
-    async fn get_session(&self) -> Result<(Arc<Mutex<Session>>, usize), ort::Error> {
+    async fn get_session(
+        &self,
+    ) -> Result<(Arc<Mutex<Session>>, usize, SemaphorePermit<'_>), ort::Error> {
         let _permit = self.sem.acquire().await.unwrap();
 
         if let Some(idx) = self.available_sessions.lock().await.pop() {
             let sessions = self.sessions.lock().await;
-            return Ok((sessions[idx].clone(), idx));
+            return Ok((sessions[idx].clone(), idx, _permit));
         }
 
         if self.sessions.lock().await.len() < self.max {
             let session = match self.create_new() {
                 Ok(v) => v,
                 Err(e) => {
-                    self.sem.add_permits(1);
                     return Err(e);
                 }
             };
             let mut sessions = self.sessions.lock().await;
             sessions.push(session.clone());
-            return Ok((session, sessions.len() - 1));
+            return Ok((session, sessions.len() - 1, _permit));
         }
 
         unreachable!()
@@ -106,13 +107,13 @@ impl AsyncSessionPool {
         input_values: impl Into<SessionInputs<'i, 'v, N>>,
         run_options: &'r RunOptions<O>,
     ) -> Result<SessionOutputs<'r>, ort::Error> {
-        let (ses, idx) = self.get_session().await?;
+        let (ses, idx, permit) = self.get_session().await?;
         let ses: &'s mut Session = unsafe { &mut *(&mut *ses.lock().await as *mut Session) };
         let out = match ses.run_async(input_values, run_options) {
             Ok(v) => v.await,
             Err(e) => Err(e),
         };
-        self.release_session(idx).await;
+        self.release_session(idx, permit).await;
         out
     }
 
@@ -135,7 +136,7 @@ impl AsyncSessionPool {
         ),
         ort::Error,
     > {
-        let (ses, idx) = self.get_session().await?;
+        let (ses, idx, permit) = self.get_session().await?;
         let ses_ptr = &mut *ses.lock().await as *mut Session;
         let ses1: &'s mut Session = unsafe { &mut *(ses_ptr) };
         let ses2: &'s mut Session = unsafe { &mut *(ses_ptr) };
@@ -148,7 +149,7 @@ impl AsyncSessionPool {
         };
         let end = ses2.end_profiling()?;
         let now = SystemTime::now().duration_since(earlier);
-        self.release_session(idx).await;
+        self.release_session(idx, permit).await;
         out.map(|v| (v, now, end))
     }
 }
