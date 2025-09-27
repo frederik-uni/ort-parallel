@@ -5,7 +5,7 @@ use std::{
 };
 
 use ort::session::{
-    RunOptions, SelectedOutputMarker, Session, SessionInputs, SessionOutputs,
+    Input, RunOptions, SelectedOutputMarker, Session, SessionInputs, SessionOutputs,
     builder::{PrepackedWeights, SessionBuilder},
 };
 
@@ -20,6 +20,14 @@ pub struct AsyncSessionPool {
     max: usize,
     builder: SessionBuilderFactory,
     file: PathBuf,
+    pub inputs: Vec<Input>,
+}
+
+fn clone_inputs(inp: &Input) -> Input {
+    Input {
+        name: inp.name.clone(),
+        input_type: inp.input_type.clone(),
+    }
 }
 
 impl AsyncSessionPool {
@@ -31,10 +39,11 @@ impl AsyncSessionPool {
         assert!(max_sessions > 0);
         let prepacked_weights = PrepackedWeights::new();
         let builder = builder.with_prepacked_weights(&prepacked_weights)?;
+        let fs = builder.clone().commit_from_file(path)?;
+        let inputs = fs.inputs.iter().map(clone_inputs).collect::<Vec<Input>>();
         Ok(Self {
-            sessions: Arc::new(Mutex::new(vec![Arc::new(Mutex::new(
-                builder.clone().commit_from_file(path)?,
-            ))])),
+            inputs,
+            sessions: Arc::new(Mutex::new(vec![Arc::new(Mutex::new(fs))])),
             sem: Arc::new(Semaphore::new(max_sessions)),
             available_sessions: Arc::new(Mutex::new(vec![0])),
             max: max_sessions,
